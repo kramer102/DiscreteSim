@@ -196,7 +196,7 @@ def machine_log(machines):
     return machine_log
 
 
-
+#%%
 def get_slots_used(machine_log, machines):
     """
     helper function for utilization
@@ -295,5 +295,3 @@ if __name__ == "__main__":
     sim_time_stop = time.time()
     print "elapsed time {0}".format(sim_time_stop - sim_start_time)
 #    utilization = get_utilization(machine_log)
-
-#test git Test git
