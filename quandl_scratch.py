@@ -8,6 +8,8 @@ Created on Tue Jun  7 15:52:14 2016
 ## use pip install quandl
 
 import quandl
+import matplotlib.pyplot as plt
+import scipy.stats as st
 
 # my api key --> hope no-one abuses this
 quandl.ApiConfig.api_key = 'zFCX5bmbwZvgGzHu5szi'
@@ -17,7 +19,34 @@ quandl.ApiConfig.api_key = 'zFCX5bmbwZvgGzHu5szi'
 # help for python commands:
 # https://www.quandl.com/tools/python
 snp_index = quandl.get("YAHOO/FUND_VFINX", authtoken="zFCX5bmbwZvgGzHu5szi")
-gold_eft = quandl.get("YAHOO/FUND_VGPMX", authtoken="zFCX5bmbwZvgGzHu5szi")
+mining_eft = quandl.get("YAHOO/FUND_VGPMX", authtoken="zFCX5bmbwZvgGzHu5szi")
 total_bond = quandl.get("YAHOO/FUND_VBMFX", authtoken="zFCX5bmbwZvgGzHu5szi")
+
+snp_index_rdiff = quandl.get("YAHOO/FUND_VFINX", authtoken="zFCX5bmbwZvgGzHu5szi", transform="rdiff")
+mining_eft_rdiff = quandl.get("YAHOO/FUND_VGPMX", authtoken="zFCX5bmbwZvgGzHu5szi", transform="rdiff")
+total_bond_rdiff = quandl.get("YAHOO/FUND_VBMFX", authtoken="zFCX5bmbwZvgGzHu5szi", transform="rdiff")
+
+# visualize distributions
+f1, (plot1, plot2, plot3) = plt.subplots(3, sharex=True, sharey=True)
+plot1.hist(snp_index.Close, 20)
+plot2.hist(mining_eft.Close, 20)
+plot3.hist(total_bond.Close, 20)
+f1.subplots_adjust(hspace=0)
+plt.setp([a.get_xticklabels() for a in f1.axes[:-1]], visible=False)
+plt.savefig('MarketRBP.png')
+plt.show()
+
+f2, (plot1, plot2, plot3) = plt.subplots(3, sharex=True, sharey=True)
+plot1.hist(snp_index_rdiff.Close, 20)
+plot2.hist(mining_eft_rdiff.Close, 20)
+plot3.hist(total_bond_rdiff.Close, 20)
+f2.subplots_adjust(hspace=0)
+plt.setp([a.get_xticklabels() for a in f2.axes[:-1]], visible=False)
+plt.savefig('MarketDiffRBP.png')
+plt.show()
+
+loc1, scale1 = st.norm.fit(snp_index_rdiff.Close)
+loc2, scale2 = st.norm.fit(mining_eft_rdiff.Close)
+loc3, scale3 = st.norm.fit(total_bond_rdiff.Close)
 
 # %%

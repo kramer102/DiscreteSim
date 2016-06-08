@@ -7,7 +7,7 @@ import scipy.stats as st
 import matplotlib.pyplot as plt
 
 # iterations
-NUMTRIALS = 1
+NUMTRIALS = 2
 # 20 year simulation
 RUNTIME = int(365*20)
 # sample from historical or future data
@@ -20,8 +20,14 @@ class user(object):
         self.wallet = simpy.Container(env, 1000000, initial)
         self.wallethistory = []
 
+        # interested or not in investing
+        self.interest = 1
+
     def life(self):
         while True:
+            # probability of bad event
+            # 1% chance of 1 bad thing in a 5 year period
+
             # something weird happens every once in awhile
             trouble = random.expovariate(1/(5*365))
             if trouble < 0: trouble = 0
@@ -61,31 +67,47 @@ class user(object):
             yield self.wallet.put(wage)
 
 
-def market(env, user, accounts):
-    # grab market data from quandl
-    quandl.ApiConfig.api_key = 'zFCX5bmbwZvgGzHu5szi'
-    snp_index = quandl.get("YAHOO/FUND_VFINX", authtoken="zFCX5bmbwZvgGzHu5szi")
-    mining_eft = quandl.get("YAHOO/FUND_VGPMX", authtoken="zFCX5bmbwZvgGzHu5szi")
-    total_bond = quandl.get("YAHOO/FUND_VBMFX", authtoken="zFCX5bmbwZvgGzHu5szi")
+class Market(object):
+    def __init__(self):
+        # grab market data from quandl
+        quandl.ApiConfig.api_key = 'zFCX5bmbwZvgGzHu5szi'
+        snp_index = quandl.get("YAHOO/FUND_VFINX", authtoken="zFCX5bmbwZvgGzHu5szi", transform="rdiff")
+        mining_eft = quandl.get("YAHOO/FUND_VGPMX", authtoken="zFCX5bmbwZvgGzHu5szi", transform="rdiff")
+        total_bond = quandl.get("YAHOO/FUND_VBMFX", authtoken="zFCX5bmbwZvgGzHu5szi", transform="rdiff")
 
-    def history(time, account):
+        self.snp_index = np.asarray(snp_index.Close)
+        self.mining_eft = np.asarray(mining_eft.Close)
+        self.total_bond = np.asarray(total_bond.Close)
+
+        # modeled each fund as a normal distribution
+        self.loc1, self.scale1 = st.norm.fit(snp_index)
+        self.loc2, self.scale2 = st.norm.fit(mining_eft)
+        self.loc3, self.scale3 = st.norm.fit(total_bond)
+
+    def history(self, time, account):
         if account.name == 'mining':
-            return mining_eft.ix[time].close
+            return self.mining_eft[time]
         if account.name == 'index':
-            return snp_index.ix[time].close
+            return self.snp_index[time]
         if account.name == 'bond':
-            return total_bond.ix[time].close
+            return self.total_bond[time]
 
-    def generate():
-        return np.random.normal(0, 0.01)
+    def generate(self, account):
+        if account.name == 'mining':
+            return np.random.normal(self.loc1, self.scale1)
+        if account.name == 'index':
+            return np.random.normal(self.loc2, self.scale2)
+        if account.name == 'bond':
+            return np.random.normal(self.loc3, self.scale3)
 
-    def update(env, account):
-
+    def update(self, env, account):
         percentchange = 0
+        # if trial is using historical data
         if SAMPLE == 'h':
-            percentchange = history(int(env.now), account)
+            percentchange = self.history(int(env.now), account)
+        # if trial is using future data
         elif SAMPLE == 'f':
-            percentchange = generate()
+            percentchange = self.generate(account)
 
         # calculate change
         change = percentchange*account.level
@@ -99,17 +121,18 @@ def market(env, user, accounts):
         # log balance change
         account.value.append([env.now, percentchange, change, account.level])
 
-    while True:
-        for i in range(len(accounts)):
+    def run(self, env, user, accounts):
+        while True:
+            for i in range(len(accounts)):
 
-            # update the worth of each account
-            update(env, accounts[i])
+                # update the worth of each account
+                self.update(env, accounts[i])
 
-        # store wallet history
-        user.wallethistory.append(env.now, user.wallet.level)
+            # store wallet history
+            user.wallethistory.append(env.now, user.wallet.level)
 
-        # wait until next day
-        yield env.timeout(1)
+            # wait until next day
+            yield env.timeout(1)
 
 
 class Investor(object):
@@ -186,9 +209,6 @@ class Account(simpy.Container):
         self.fees.append([self.env.now, fee, 'sell'])
         return simpy.Container.put(*newargs, **kwargs)
 
-    def history(self):
-        # select random 20 year span from 30-year quandl data
-
 
 class logbook(object):
     def __init__(self):
@@ -232,10 +252,8 @@ def setup(env, trial):
 
     accounts = [mining, index, bond]
 
-    index.history =
-
     # market process
-    env.process(market(env, Jack, accounts))
+    env.process(market.run(env, Jack, accounts))
 
     # investor processes
     env.process(Rich.invest(Jack, accounts))
@@ -249,11 +267,17 @@ def setup(env, trial):
     # prepare logbook to store data
     env.process(log.store(env, trial, Rich, accounts, Jack))
 
+#initialize market to be used for all trials
+market = Market()
 
 # run all trials
 for i in range(1, NUMTRIALS+1):
 
     print('\n * * * * * * Trial {0} * * * * * * \n'.format(i))
+
+    # switches to future (generated) data for second half of trials
+    if i > int(NUMTRIALS/2):
+        SAMPLE = 'f'
 
     # defining the environment
     env = simpy.Environment()
