@@ -1,12 +1,17 @@
 import simpy
 import numpy as np
+import random
+import quandl
 import pandas as pd
 import scipy.stats as st
 import matplotlib.pyplot as plt
 
-
+# iterations
 NUMTRIALS = 1
-RUNTIME = int(365*10)
+# 20 year simulation
+RUNTIME = int(365*20)
+# sample from historical or future data
+SAMPLE = 'h'
 
 
 class user(object):
@@ -17,14 +22,22 @@ class user(object):
 
     def life(self):
         while True:
-            # something bad happens every once in awhile
-            trouble = np.random.normal(45, 10)
+            # something weird happens every once in awhile
+            trouble = random.expovariate(1/(5*365))
             if trouble < 0: trouble = 0
             yield self.env.timeout(trouble)
 
-            # bad shit can be expensive
-            cost = np.random.normal(200, 25)
-            yield self.wallet.get(cost)
+            # alea iacta est
+            chance = random.randint(0, 100)
+
+            # fate has smiled on you
+            if chance > 50:
+                bonus = np.random.normal(4000, 2000)
+                yield self.wallet.put(bonus)
+                # the gods shit on you
+            elif chance < 50:
+                cost = np.random.normal(4000, 2000)
+                yield self.wallet.get(cost)
 
     def bills(self, rent, utilities, insurance):
         while True:
@@ -49,13 +62,30 @@ class user(object):
 
 
 def market(env, user, accounts):
+    # grab market data from quandl
+    quandl.ApiConfig.api_key = 'zFCX5bmbwZvgGzHu5szi'
+    snp_index = quandl.get("YAHOO/FUND_VFINX", authtoken="zFCX5bmbwZvgGzHu5szi")
+    mining_eft = quandl.get("YAHOO/FUND_VGPMX", authtoken="zFCX5bmbwZvgGzHu5szi")
+    total_bond = quandl.get("YAHOO/FUND_VBMFX", authtoken="zFCX5bmbwZvgGzHu5szi")
+
+    def history(time, account):
+        if account.name == 'mining':
+            return mining_eft.ix[time].close
+        if account.name == 'index':
+            return snp_index.ix[time].close
+        if account.name == 'bond':
+            return total_bond.ix[time].close
+
+    def generate():
+        return np.random.normal(0, 0.01)
 
     def update(env, account):
 
-        # placeholder for a history function which checks quandl data
-        ## percentchange = history(account.name, int(env.now))
-
-        percentchange = np.random.normal(0, 0.01)
+        percentchange = 0
+        if SAMPLE == 'h':
+            percentchange = history(int(env.now), account)
+        elif SAMPLE == 'f':
+            percentchange = generate()
 
         # calculate change
         change = percentchange*account.level
@@ -156,6 +186,9 @@ class Account(simpy.Container):
         self.fees.append([self.env.now, fee, 'sell'])
         return simpy.Container.put(*newargs, **kwargs)
 
+    def history(self):
+        # select random 20 year span from 30-year quandl data
+
 
 class logbook(object):
     def __init__(self):
@@ -193,11 +226,13 @@ def setup(env, trial):
     Rich = Investor(env)
 
     # investment accounts to open
-    gold = Account(env, 100000, 0, 'gold', 150, 0.011, 0.008)
-    snacks = Account(env, 100000, 0, 'snacks', 100, 0.016, 0.009)
-    something = Account(env, 100000, 0, 'something', 100, 0.006, 0.012)
+    mining = Account(env, 100000, 0, 'mining', 150, 0.011, 0.008)
+    index = Account(env, 100000, 0, 'index', 100, 0.016, 0.009)
+    bond = Account(env, 100000, 0, 'bond', 100, 0.006, 0.012)
 
-    accounts = [gold, snacks, something]
+    accounts = [mining, index, bond]
+
+    index.history =
 
     # market process
     env.process(market(env, Jack, accounts))
