@@ -7,9 +7,10 @@ import scipy.stats as st
 import matplotlib.pyplot as plt
 
 # iterations
-NUMTRIALS = 2
+NUMTRIALS = 4
 # 20 year simulation
-RUNTIME = int(365*20)
+# RUNTIME = int(365*20)
+RUNTIME = 365
 # sample from historical or future data
 SAMPLE = 'h'
 
@@ -39,11 +40,13 @@ class user(object):
             # fate has smiled on you
             if chance > 50:
                 bonus = np.random.normal(4000, 2000)
-                yield self.wallet.put(bonus)
-                # the gods shit on you
+                yield self.wallet.put(self.wallet, bonus)
+                print('something wonderful has happened. {0}').format(bonus)
+            # the gods shit on you
             elif chance < 50:
                 cost = np.random.normal(4000, 2000)
-                yield self.wallet.get(cost)
+                yield self.wallet.get(self.wallet, cost)
+                print('something terrible has happened. {0}').format(cost)
 
     def bills(self, rent, utilities, insurance):
         while True:
@@ -56,7 +59,8 @@ class user(object):
 
             # total expenses
             expenses = rent+utilities+insurance+extra
-            yield self.wallet.get(expenses)
+            yield self.wallet.get(self.wallet, expenses)
+            print('bills paid {0}').format(expenses)
 
     def income(self, wage, period):
         while True:
@@ -64,11 +68,14 @@ class user(object):
             yield self.env.timeout(period)
 
             # deposit paycheck into wallet
-            yield self.wallet.put(wage)
+            yield self.wallet.put(self.wallet, wage)
+            print('payday {0}').format(wage)
 
 
 class Market(object):
     def __init__(self):
+        print 'acquiring market data'
+
         # grab market data from quandl
         quandl.ApiConfig.api_key = 'zFCX5bmbwZvgGzHu5szi'
         snp_index = quandl.get("YAHOO/FUND_VFINX", authtoken="zFCX5bmbwZvgGzHu5szi", transform="rdiff")
@@ -80,9 +87,11 @@ class Market(object):
         self.total_bond = np.asarray(total_bond.Close)
 
         # modeled each fund as a normal distribution
-        self.loc1, self.scale1 = st.norm.fit(snp_index)
-        self.loc2, self.scale2 = st.norm.fit(mining_eft)
-        self.loc3, self.scale3 = st.norm.fit(total_bond)
+        self.loc1, self.scale1 = st.norm.fit(self.snp_index)
+        self.loc2, self.scale2 = st.norm.fit(self.mining_eft)
+        self.loc3, self.scale3 = st.norm.fit(self.total_bond)
+
+        print 'market data acquired and modeled'
 
     def history(self, time, account):
         if account.name == 'mining':
@@ -112,24 +121,30 @@ class Market(object):
         # calculate change
         change = percentchange*account.level
 
+        # print account.name, account.level, change
+
         # update balance
-        if change > 0:
-            yield account.put(change)
-        elif change < 0:
-            yield account.get(change)
+        if change > 0.0:
+            account.put(account, change)
+        elif change < 0.0:
+            account.get(account, change)
 
         # log balance change
         account.value.append([env.now, percentchange, change, account.level])
 
     def run(self, env, user, accounts):
         while True:
-            for i in range(len(accounts)):
+            print('\n- - day: {0} - -').format(env.now)
 
+            for i in range(len(accounts)):
                 # update the worth of each account
                 self.update(env, accounts[i])
+                print('{0} closes at balance {1}').format(accounts[i].name, accounts[i].level)
 
             # store wallet history
-            user.wallethistory.append(env.now, user.wallet.level)
+            user.wallethistory.append([env.now, user.wallet.level])
+            print('>> wallet level at: {0}').format(user.wallet.level)
+
 
             # wait until next day
             yield env.timeout(1)
@@ -147,17 +162,17 @@ class Investor(object):
             # every 15 days invest money
             if np.mod(env.now, 15) == 0.0:
 
-                # amount sert aside to invest every pay period
+                # amount set aside to invest every pay period
                 amount = 0.1*user.wallet.level
-                yield user.wallet.get(amount)
+                yield user.wallet.get(user.wallet, amount)
 
                 # allocation strategy
                 strategy = [1/3, 1/3, 1/3]
 
                 # place investments
                 for i in range(len(accounts)):
-
-                    yield accounts[i].investment.put(int(strategy[i]*amount))
+                    print('{0} invested in {1}').format(int(strategy[i]*amount), accounts[i].name)
+                    yield accounts[i].investment.put(accounts[i], int(strategy[i]*amount))
                     self.buyhistory.append([self.env.now, accounts[i].name, int(strategy[i]*amount), accounts[i].balance])
 
     def sell(self, user, accounts):
@@ -173,11 +188,14 @@ class Investor(object):
                 # in ieu of real strategy
                 strategy = [1/3, 1/3, 1/3]
 
-                # place investments
+                # sell investments
                 for i in range(len(accounts)):
-
-                    yield accounts[i].investment.get(int(strategy[i]*amount))
+                    print('{0} sold of {1}').format(int(strategy[i]*amount), accounts[i].name)
+                    yield accounts[i].investment.get(accounts[i], int(strategy[i]*amount))
                     self.sellhistory.append([self.env.now, accounts[i].name, int(strategy[i]*amount), accounts[i].balance])
+
+                # deposit into account
+                yield user.wallet.put(user.wallet, amount)
 
 
 class Account(simpy.Container):
@@ -186,12 +204,13 @@ class Account(simpy.Container):
         self.env = env
         self.name = name
         self.buyin = buyin
-        self.put(self.buyin)
         self.buyfeerate = buyfeerate
         self.sellfeerate = sellfeerate
 
         self.value = []
         self.fees = []
+
+        self.put(self, self.buyin)
 
     def put(self, *args, **kwargs):
         amount = args[1]
@@ -221,13 +240,13 @@ class logbook(object):
 
     def record(self, trial, investor, accounts, user):
         self.trial += 1
-        self.buyhistory.append(investor.buyhistory)
-        self.sellhistory.append(investor.sellhistory)
-        self.wallethistory.append(user.wallethistory)
+        self.buyhistory.append([investor.buyhistory])
+        self.sellhistory.append([investor.sellhistory])
+        self.wallethistory.append([user.wallethistory])
 
         for i in range(len(accounts)):
-            self.valuehistory[i].append(accounts[i].value)
-            self.feehistory[i].append(accounts[i].fees)
+            self.valuehistory[i].append([accounts[i].value])
+            self.feehistory[i].append([accounts[i].fees])
 
     def store(self, env, trial, investor, accounts, user):
         while True:
@@ -237,6 +256,8 @@ class logbook(object):
 
 
 def setup(env, trial):
+    print 'setting up...\n'
+
     log = logbook()
 
     # Jack Attack
@@ -251,6 +272,9 @@ def setup(env, trial):
     bond = Account(env, 100000, 0, 'bond', 100, 0.006, 0.012)
 
     accounts = [mining, index, bond]
+
+    for i in range(len(accounts)):
+        print('{0} opening balance: {1}').format(accounts[i].name, accounts[i].level)
 
     # market process
     env.process(market.run(env, Jack, accounts))
@@ -283,7 +307,7 @@ for i in range(1, NUMTRIALS+1):
     env = simpy.Environment()
 
     # trigger startup process
-    env.process(setup(env, i))
+    setup(env, i)
 
     # execute simulation!
     env.run(until=RUNTIME)

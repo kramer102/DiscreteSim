@@ -10,6 +10,7 @@ Created on Tue Jun  7 15:52:14 2016
 import quandl
 import matplotlib.pyplot as plt
 import scipy.stats as st
+import numpy as np
 
 # my api key --> hope no-one abuses this
 quandl.ApiConfig.api_key = 'zFCX5bmbwZvgGzHu5szi'
@@ -45,8 +46,16 @@ plt.setp([a.get_xticklabels() for a in f2.axes[:-1]], visible=False)
 plt.savefig('MarketDiffRBP.png')
 plt.show()
 
-loc1, scale1 = st.norm.fit(snp_index_rdiff.Close)
-loc2, scale2 = st.norm.fit(mining_eft_rdiff.Close)
-loc3, scale3 = st.norm.fit(total_bond_rdiff.Close)
+a = np.asarray(snp_index_rdiff.Close)
+b = np.asarray(mining_eft_rdiff.Close)
+c = np.asarray(total_bond_rdiff.Close)
+
+loc1, scale1 = st.norm.fit(a)
+loc2, scale2 = st.norm.fit(b)
+loc3, scale3 = st.norm.fit(c)
+
+print loc1, scale1
+print loc2, scale2
+print loc3, scale3
 
 # %%
