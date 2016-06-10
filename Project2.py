@@ -264,8 +264,8 @@ class logbook(object):
         self.trial = 0
         self.buyhistory = []
         self.sellhistory = []
-        self.feehistory = []
-        self.valuehistory = []
+        self.feehistory = [[],[],[]]
+        self.valuehistory = [[],[],[]]
         self.wallethistory = []
 
     def record(self, trial, investor, accounts, user):
@@ -274,7 +274,7 @@ class logbook(object):
         self.sellhistory.append([investor.sellhistory])
         self.wallethistory.append([user.wallethistory])
 
-        for i in range(len(accounts)):
+        for i in range(3):
             self.valuehistory[i].append([accounts[i].value])
             self.feehistory[i].append([accounts[i].fees])
 
@@ -305,15 +305,17 @@ def setup(env, trial):
     Rich = Investor(env, Jack, accounts)
 
     # initialize and prepare logbook to store data
-    log = logbook()
-    # env.process(log.store(env, trial, Rich, accounts, Jack))
+    env.process(log.store(env, trial, Rich, accounts, Jack))
 
     # market process
     env.process(market.run(env, Jack, accounts))
 
 
-#initialize market to be used for all trials
+# initialize market to be used for all trials
 market = Market()
+
+# initialize logbook
+log = logbook()
 
 # run all trials
 for i in range(1, NUMTRIALS+1):
@@ -334,4 +336,4 @@ for i in range(1, NUMTRIALS+1):
     env.run(until=RUNTIME)
     del env
 
-# peace
+print '\npeace'
