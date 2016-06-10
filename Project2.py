@@ -13,6 +13,8 @@ NUMTRIALS = 4
 RUNTIME = 365
 # sample from historical or future data
 SAMPLE = 'h'
+# to grab data from quandl or just import from csv
+GRAB = True
 
 
 class user(object):
@@ -24,13 +26,17 @@ class user(object):
         # interested or not in investing
         self.interest = 1
 
+        env.process(self.life())
+        env.process(self.bills(1300, 200, 300))
+        env.process(self.income(1500, 15))
+
     def life(self):
         while True:
             # probability of bad event
             # 1% chance of 1 bad thing in a 5 year period
 
             # something weird happens every once in awhile
-            trouble = random.expovariate(1/(5*365))
+            trouble = random.expovariate(0.00055)
             if trouble < 0: trouble = 0
             yield self.env.timeout(trouble)
 
@@ -40,12 +46,12 @@ class user(object):
             # fate has smiled on you
             if chance > 50:
                 bonus = np.random.normal(4000, 2000)
-                yield self.wallet.put(self.wallet, bonus)
+                yield self.wallet.put(bonus)
                 print('something wonderful has happened. {0}').format(bonus)
             # the gods shit on you
             elif chance < 50:
                 cost = np.random.normal(4000, 2000)
-                yield self.wallet.get(self.wallet, cost)
+                yield self.wallet.get(cost)
                 print('something terrible has happened. {0}').format(cost)
 
     def bills(self, rent, utilities, insurance):
@@ -59,7 +65,7 @@ class user(object):
 
             # total expenses
             expenses = rent+utilities+insurance+extra
-            yield self.wallet.get(self.wallet, expenses)
+            yield self.wallet.get(expenses)
             print('bills paid {0}').format(expenses)
 
     def income(self, wage, period):
@@ -68,7 +74,7 @@ class user(object):
             yield self.env.timeout(period)
 
             # deposit paycheck into wallet
-            yield self.wallet.put(self.wallet, wage)
+            yield self.wallet.put(wage)
             print('payday {0}').format(wage)
 
 
@@ -76,22 +82,36 @@ class Market(object):
     def __init__(self):
         print 'acquiring market data'
 
-        # grab market data from quandl
-        quandl.ApiConfig.api_key = 'zFCX5bmbwZvgGzHu5szi'
-        snp_index = quandl.get("YAHOO/FUND_VFINX", authtoken="zFCX5bmbwZvgGzHu5szi", transform="rdiff")
-        mining_eft = quandl.get("YAHOO/FUND_VGPMX", authtoken="zFCX5bmbwZvgGzHu5szi", transform="rdiff")
-        total_bond = quandl.get("YAHOO/FUND_VBMFX", authtoken="zFCX5bmbwZvgGzHu5szi", transform="rdiff")
+        if GRAB == True:
+            # grab market data from quandl
+            quandl.ApiConfig.api_key = 'zFCX5bmbwZvgGzHu5szi'
+            snp_index = quandl.get("YAHOO/FUND_VFINX", authtoken="zFCX5bmbwZvgGzHu5szi", transform="rdiff")
+            mining_eft = quandl.get("YAHOO/FUND_VGPMX", authtoken="zFCX5bmbwZvgGzHu5szi", transform="rdiff")
+            total_bond = quandl.get("YAHOO/FUND_VBMFX", authtoken="zFCX5bmbwZvgGzHu5szi", transform="rdiff")
 
-        self.snp_index = np.asarray(snp_index.Close)
-        self.mining_eft = np.asarray(mining_eft.Close)
-        self.total_bond = np.asarray(total_bond.Close)
+            self.snp_index = np.asarray(snp_index.Close)
+            self.mining_eft = np.asarray(mining_eft.Close)
+            self.total_bond = np.asarray(total_bond.Close)
+
+            # modeled each fund as a normal distribution
+            self.loc1, self.scale1 = st.norm.fit(self.snp_index)
+            self.loc2, self.scale2 = st.norm.fit(self.mining_eft)
+            self.loc3, self.scale3 = st.norm.fit(self.total_bond)
+
+        else:
+            self.import_data()
+
+        print 'market data acquired and modeled'
+
+    def import_data(self):
+        self.snp_index = np.genfromtxt('snp_index.csv', delimiter=',')
+        self.mining_eft = np.genfromtxt('mining_eft.csv', delimiter=',')
+        self.total_bond = np.genfromtxt('total_bond.csv', delimiter=',')
 
         # modeled each fund as a normal distribution
         self.loc1, self.scale1 = st.norm.fit(self.snp_index)
         self.loc2, self.scale2 = st.norm.fit(self.mining_eft)
         self.loc3, self.scale3 = st.norm.fit(self.total_bond)
-
-        print 'market data acquired and modeled'
 
     def history(self, time, account):
         if account.name == 'mining':
@@ -127,6 +147,7 @@ class Market(object):
         if change > 0.0:
             account.put(account, change)
         elif change < 0.0:
+            change = -1*change
             account.get(account, change)
 
         # log balance change
@@ -151,29 +172,36 @@ class Market(object):
 
 
 class Investor(object):
-    def __init__(self, env):
+    def __init__(self, env, client, accounts):
         self.env = env
         self.buyhistory = []
         self.sellhistory = []
+
+        env.process(self.invest(client, accounts))
+        env.process(self.sell(client, accounts))
 
     def invest(self, user, accounts):
 
         while True:
             # every 15 days invest money
+
             if np.mod(env.now, 15) == 0.0:
+                print 'yey'
 
                 # amount set aside to invest every pay period
                 amount = 0.1*user.wallet.level
-                yield user.wallet.get(user.wallet, amount)
+                yield user.wallet.get(amount)
 
                 # allocation strategy
-                strategy = [1/3, 1/3, 1/3]
+                strategy = [0.33, 0.33, 0.33]
 
                 # place investments
                 for i in range(len(accounts)):
                     print('{0} invested in {1}').format(int(strategy[i]*amount), accounts[i].name)
-                    yield accounts[i].investment.put(accounts[i], int(strategy[i]*amount))
-                    self.buyhistory.append([self.env.now, accounts[i].name, int(strategy[i]*amount), accounts[i].balance])
+                    yield accounts[i].put(accounts[i], int(strategy[i]*amount))
+                    self.buyhistory.append([self.env.now, accounts[i].name, int(strategy[i]*amount), accounts[i].level])
+
+            yield env.timeout(1)
 
     def sell(self, user, accounts):
 
@@ -186,16 +214,18 @@ class Investor(object):
                 amount = 2000
 
                 # in ieu of real strategy
-                strategy = [1/3, 1/3, 1/3]
+                strategy = [0.33, 0.33, 0.33]
 
                 # sell investments
                 for i in range(len(accounts)):
                     print('{0} sold of {1}').format(int(strategy[i]*amount), accounts[i].name)
                     yield accounts[i].investment.get(accounts[i], int(strategy[i]*amount))
-                    self.sellhistory.append([self.env.now, accounts[i].name, int(strategy[i]*amount), accounts[i].balance])
+                    self.sellhistory.append([self.env.now, accounts[i].name, int(strategy[i]*amount), accounts[i].level])
 
                 # deposit into account
-                yield user.wallet.put(user.wallet, amount)
+                yield user.wallet.put(amount)
+
+            yield env.timeout(1)
 
 
 class Account(simpy.Container):
@@ -251,20 +281,15 @@ class logbook(object):
     def store(self, env, trial, investor, accounts, user):
         while True:
             # stores all data at the last second
-            yield env.timeout(RUNTIME)
+            yield env.timeout(RUNTIME-1)
             self.record(trial, investor, accounts, user)
 
 
 def setup(env, trial):
     print 'setting up...\n'
 
-    log = logbook()
-
     # Jack Attack
     Jack = user(env, 1000)
-
-    # Rich Chambers
-    Rich = Investor(env)
 
     # investment accounts to open
     mining = Account(env, 100000, 0, 'mining', 150, 0.011, 0.008)
@@ -276,20 +301,16 @@ def setup(env, trial):
     for i in range(len(accounts)):
         print('{0} opening balance: {1}').format(accounts[i].name, accounts[i].level)
 
+    # Rich Chambers (actual name of an accountant I knew)
+    Rich = Investor(env, Jack, accounts)
+
+    # initialize and prepare logbook to store data
+    log = logbook()
+    # env.process(log.store(env, trial, Rich, accounts, Jack))
+
     # market process
     env.process(market.run(env, Jack, accounts))
 
-    # investor processes
-    env.process(Rich.invest(Jack, accounts))
-    env.process(Rich.sell(Jack, accounts))
-
-    # user processes
-    env.process(Jack.life())
-    env.process(Jack.bills(1300, 200, 300))
-    env.process(Jack.income(1500, 15))
-
-    # prepare logbook to store data
-    env.process(log.store(env, trial, Rich, accounts, Jack))
 
 #initialize market to be used for all trials
 market = Market()
