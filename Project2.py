@@ -14,7 +14,7 @@ RUNTIME = 365
 # sample from historical or future data
 SAMPLE = 'h'
 # to grab data from quandl or just import from csv
-GRAB = True
+GRAB = False
 
 
 class user(object):
@@ -88,30 +88,21 @@ class Market(object):
             snp_index = quandl.get("YAHOO/FUND_VFINX", authtoken="zFCX5bmbwZvgGzHu5szi", transform="rdiff")
             mining_eft = quandl.get("YAHOO/FUND_VGPMX", authtoken="zFCX5bmbwZvgGzHu5szi", transform="rdiff")
             total_bond = quandl.get("YAHOO/FUND_VBMFX", authtoken="zFCX5bmbwZvgGzHu5szi", transform="rdiff")
-
-            self.snp_index = np.asarray(snp_index.Close)
-            self.mining_eft = np.asarray(mining_eft.Close)
-            self.total_bond = np.asarray(total_bond.Close)
-
-            # modeled each fund as a normal distribution
-            self.loc1, self.scale1 = st.norm.fit(self.snp_index)
-            self.loc2, self.scale2 = st.norm.fit(self.mining_eft)
-            self.loc3, self.scale3 = st.norm.fit(self.total_bond)
-
         else:
-            self.import_data()
-
-        print 'market data acquired and modeled'
-
-    def import_data(self):
-        self.snp_index = np.genfromtxt('snp_index.csv', delimiter=',')
-        self.mining_eft = np.genfromtxt('mining_eft.csv', delimiter=',')
-        self.total_bond = np.genfromtxt('total_bond.csv', delimiter=',')
+            snp_index = pd.read_csv('snp_index.csv')
+            mining_eft = pd.read_csv('mining_eft.csv')
+            total_bond = pd.read_csv('total_bond.csv')
+            
+        self.snp_index = np.asarray(snp_index.Close)
+        self.mining_eft = np.asarray(mining_eft.Close)
+        self.total_bond = np.asarray(total_bond.Close)
 
         # modeled each fund as a normal distribution
         self.loc1, self.scale1 = st.norm.fit(self.snp_index)
         self.loc2, self.scale2 = st.norm.fit(self.mining_eft)
         self.loc3, self.scale3 = st.norm.fit(self.total_bond)
+
+        print 'market data acquired and modeled'
 
     def history(self, time, account):
         if account.name == 'mining':

@@ -58,4 +58,15 @@ print loc1, scale1
 print loc2, scale2
 print loc3, scale3
 
-# %%
+#%%
+# grab and store data for grab
+
+quandl.ApiConfig.api_key = 'zFCX5bmbwZvgGzHu5szi'
+snp_index = quandl.get("YAHOO/FUND_VFINX", authtoken="zFCX5bmbwZvgGzHu5szi", transform="rdiff")
+mining_eft = quandl.get("YAHOO/FUND_VGPMX", authtoken="zFCX5bmbwZvgGzHu5szi", transform="rdiff")
+total_bond = quandl.get("YAHOO/FUND_VBMFX", authtoken="zFCX5bmbwZvgGzHu5szi", transform="rdiff")
+
+snp_index.to_csv('snp_index.csv')
+mining_eft.to_csv('mining_eft.csv')
+total_bond.to_csv('total_bond.csv')
+#%%
