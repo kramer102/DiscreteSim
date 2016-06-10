@@ -165,7 +165,9 @@ class Market(object):
 class Investor(object):
     def __init__(self, env, client, accounts):
         self.env = env
+        # formatted as [day, account name, amount bought, total account value]
         self.buyhistory = []
+        # formatted as [day, account name, amount sold, total account value]
         self.sellhistory = []
 
         env.process(self.invest(client, accounts))
@@ -228,7 +230,9 @@ class Account(simpy.Container):
         self.buyfeerate = buyfeerate
         self.sellfeerate = sellfeerate
 
+        # formatted as [day, % change, $ change, total account value]
         self.value = []
+        # formatted as [day, fee paid, buying/selling]
         self.fees = []
 
         self.put(self, self.buyin)
@@ -253,27 +257,100 @@ class Account(simpy.Container):
 class logbook(object):
     def __init__(self):
         self.trial = 0
+
+        # formatted as [trial]
+        #   each item formatted as [day, account name, amount bought, total account value]
         self.buyhistory = []
+
+        # formatted as [trial]
+        #   each item formatted as [day, account name, amount sold, total account value]
         self.sellhistory = []
+
+        # formatted as [[account fund][trial][day]]
+        #   each item formatted as [day, fee paid, buying/selling]
         self.feehistory = [[],[],[]]
+
+        # formatted as [[account fund][trial][day]]
+        #   each item formatted as [day, % change, $ change, total account value]
         self.valuehistory = [[],[],[]]
+
+        # formatted as [trial]
+        #   each item formatted as [day, wallet balance]
         self.wallethistory = []
 
     def record(self, trial, investor, accounts, user):
         self.trial += 1
-        self.buyhistory.append([investor.buyhistory])
-        self.sellhistory.append([investor.sellhistory])
-        self.wallethistory.append([user.wallethistory])
+        self.buyhistory.append(investor.buyhistory)
+        self.sellhistory.append(investor.sellhistory)
+        self.wallethistory.append(user.wallethistory)
 
         for i in range(3):
-            self.valuehistory[i].append([accounts[i].value])
-            self.feehistory[i].append([accounts[i].fees])
+            self.valuehistory[i].append(accounts[i].value)
+            self.feehistory[i].append(accounts[i].fees)
 
     def store(self, env, trial, investor, accounts, user):
         while True:
             # stores all data at the last second
             yield env.timeout(RUNTIME-1)
             self.record(trial, investor, accounts, user)
+
+
+def graph():
+    # plot wallet value over time
+    wh = []
+    f1, (plot1, plot2) = plt.subplots(2, sharex=True)
+    plot1.set_title('Worth over Time')
+    plt.xlabel('Time (days)')
+    plt.ylabel('Wallet (dollars)')
+    for i in range(NUMTRIALS):
+        wh.append(pd.DataFrame(log.wallethistory[i]).set_index(0))
+        plot1.plot(wh[i])
+
+        # plot 2 should be here and should show net worth
+    f1.savefig('worth.png')
+    plt.show()
+
+    # plot comparison of value of all three accounts over time
+    index_val = []
+    mining_val = []
+    bond_val = []
+    f2, (plot1, plot2, plot3) = plt.subplots(3, sharex=True)
+    plt.xlabel('Time (days)')
+    plt.ylabel('Value (dollars)')
+    for i in range(NUMTRIALS):
+
+        index_val.append(pd.DataFrame(log.valuehistory[0][i]).set_index(0))
+        plot1.plot(index_val[i].ix[:, 2])
+
+        mining_val.append(pd.DataFrame(log.valuehistory[1][i]).set_index(0))
+        plot2.plot(mining_val[i].ix[:, 2])
+
+        bond_val.append(pd.DataFrame(log.valuehistory[2][i]).set_index(0))
+        plot3.plot(bond_val[i].ix[:, 2])
+    plt.title('Investment Account Value over Time')
+    f2.savefig('accountvalues.png')
+    plt.show()
+
+    sh = []
+    bh = []
+    # plot comparison of buying and selling of all three accounts over time
+    f3, (plot1, plot2) = plt.subplots(2, sharex=True)
+    plot1.set_title('Investments Sold')
+    plot2.set_title('Investments Bought')
+    plt.xlabel('Time (days)')
+    plt.ylabel('Investments (dollars)')
+    for i in range(NUMTRIALS):
+        sh.append(pd.DataFrame(log.sellhistory[i], columns=['day', 'account', 'amount', 'total']))
+        plot1.plot(sh[i][sh[i].account == 'index'].amount, c='red')
+        plot1.plot(sh[i][sh[i].account == 'mining'].amount, c='green')
+        plot1.plot(sh[i][sh[i].account == 'bond'].amount, c='blue')
+
+        bh.append(pd.DataFrame(log.buyhistory[i], columns=['day', 'account', 'amount', 'total']))
+        plot2.plot(bh[i][bh[i].account == 'index'].amount, c='red')
+        plot2.plot(bh[i][bh[i].account == 'mining'].amount, c='green')
+        plot2.plot(bh[i][bh[i].account == 'bond'].amount, c='blue')
+    f3.savefig('buysell.png')
+    plt.show()
 
 
 def setup(env, trial):
@@ -326,5 +403,7 @@ for i in range(1, NUMTRIALS+1):
     # execute simulation!
     env.run(until=RUNTIME)
     del env
+
+graph()
 
 print '\npeace'
