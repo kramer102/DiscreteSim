@@ -23,12 +23,14 @@ class user(object):
         self.wallet = simpy.Container(env, 1000000, initial)
         self.wallethistory = []
 
+        self.wage = 1500
+
         # interested or not in investing
         self.interest = 1
 
         env.process(self.life())
         env.process(self.bills(1300, 200, 300))
-        env.process(self.income(1500, 15))
+        env.process(self.income(15))
 
     def life(self):
         while True:
@@ -68,14 +70,14 @@ class user(object):
             yield self.wallet.get(expenses)
             print('bills paid {0}').format(expenses)
 
-    def income(self, wage, period):
+    def income(self, period):
         while True:
             # get paid once per pay period
             yield self.env.timeout(period)
 
             # deposit paycheck into wallet
-            yield self.wallet.put(wage)
-            print('payday {0}').format(wage)
+            yield self.wallet.put(self.wage)
+            print('payday {0}').format(self.wage)
 
 
 class Market(object):
@@ -157,7 +159,6 @@ class Market(object):
             user.wallethistory.append([env.now, user.wallet.level])
             print('>> wallet level at: {0}').format(user.wallet.level)
 
-
             # wait until next day
             yield env.timeout(1)
 
@@ -179,10 +180,9 @@ class Investor(object):
             # every 15 days invest money
 
             if np.mod(env.now, 15) == 0.0:
-                print 'yey'
 
                 # amount set aside to invest every pay period
-                amount = 0.1*user.wallet.level
+                amount = 0.1*user.wage
                 yield user.wallet.get(amount)
 
                 # allocation strategy
@@ -278,6 +278,9 @@ class logbook(object):
         #   each item formatted as [day, wallet balance]
         self.wallethistory = []
 
+        # store the market behavior for a each trial
+        self.market = []
+
     def record(self, trial, investor, accounts, user):
         self.trial += 1
         self.buyhistory.append(investor.buyhistory)
@@ -302,11 +305,13 @@ def graph():
     plot1.set_title('Worth over Time')
     plt.xlabel('Time (days)')
     plt.ylabel('Wallet (dollars)')
+    # makes wh, a list of wallet history dataframes for each trial
     for i in range(NUMTRIALS):
+        # plot the wallet history over time for each trial
         wh.append(pd.DataFrame(log.wallethistory[i]).set_index(0))
         plot1.plot(wh[i])
 
-        # plot 2 should be here and should show net worth
+    # plot 2 should be here and should show net worth
     f1.savefig('worth.png')
     plt.show()
 
@@ -318,13 +323,13 @@ def graph():
     plt.xlabel('Time (days)')
     plt.ylabel('Value (dollars)')
     for i in range(NUMTRIALS):
-
+        # plot the value of the investments in the mining account
         index_val.append(pd.DataFrame(log.valuehistory[0][i]).set_index(0))
         plot1.plot(index_val[i].ix[:, 2])
-
+        # plot the value of the investments in the index account
         mining_val.append(pd.DataFrame(log.valuehistory[1][i]).set_index(0))
         plot2.plot(mining_val[i].ix[:, 2])
-
+        # plot the value of the investments in the bond account
         bond_val.append(pd.DataFrame(log.valuehistory[2][i]).set_index(0))
         plot3.plot(bond_val[i].ix[:, 2])
     plt.title('Investment Account Value over Time')
