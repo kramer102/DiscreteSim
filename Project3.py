@@ -54,7 +54,7 @@ class user(object):
             # 1% chance of 1 bad thing in a 5 year period
 
             # something weird happens every once in awhile
-            trouble = random.expovariate(0.00055)
+            trouble = random.expovariate(0.005)
             if trouble < 0: trouble = 0
             yield self.env.timeout(trouble)
 
@@ -64,12 +64,16 @@ class user(object):
             # fate has smiled on you
             if chance > 50:
                 bonus = np.random.normal(4000, 2000)
-                yield self.wallet.put(bonus)
+                try: yield self.wallet.put(bonus)
+                except ValueError:
+                    yield self.wallet.put(-bonus)
                 print('something wonderful has happened. {0}').format(bonus)
             # the gods shit on you
             elif chance < 50:
                 cost = np.random.normal(4000, 2000)
-                yield self.wallet.get(cost)
+                try: yield self.wallet.get(cost)
+                except ValueError:
+                    yield self.wallet.get(-cost)
                 print('something terrible has happened. {0}').format(cost)
 
     def bills(self, rent, utilities, insurance):
@@ -147,7 +151,7 @@ class Market(object):
         percentchange = 0
         # if trial is using historical data
         if SAMPLE == 'h':
-            percentchange = self.history(int(env.now), account)
+            percentchange = self.history(int(env.now)+log.market_start, account)
         # if trial is using future data
         elif SAMPLE == 'f':
             percentchange = self.generate(account)
@@ -169,6 +173,10 @@ class Market(object):
 
     def run(self, env, user, accounts):
         while True:
+            # the weekends aren't trading days
+            if np.mod(env.now+1, 5):
+                yield env.timeout(2)
+
             print('\n- - day: {0} - -').format(env.now)
 
             for i in range(len(accounts)):
@@ -210,7 +218,7 @@ class Investor(object):
                 # place investments
                 for i in range(len(accounts)):
                     print('{0} invested in {1}').format(int(strategy[i]*amount), accounts[i].name)
-                    yield accounts[i].put(accounts[i], int(strategy[i]*amount))
+                    yield accounts[i].put(accounts[i], int(strategy[i]*amount), 'fee')
                     self.buyhistory.append([self.env.now, accounts[i].name, int(strategy[i]*amount), accounts[i].level])
             yield env.timeout(1)
 
@@ -227,7 +235,7 @@ class Investor(object):
                 # sell investments
                 for i in range(len(accounts)):
                     print('{0} sold of {1}').format(int(strategy[i]*amount), accounts[i].name)
-                    yield accounts[i].investment.get(accounts[i], int(strategy[i]*amount))
+                    yield accounts[i].investment.get(accounts[i], int(strategy[i]*amount), 'fee')
                     self.sellhistory.append([self.env.now, accounts[i].name, int(strategy[i]*amount), accounts[i].level])
 
                 # deposit into account
@@ -253,20 +261,26 @@ class Account(simpy.Container):
 
     def put(self, *args, **kwargs):
         # some amount subtracted off the top for buying fees
-        amount = args[1]
-        fee = self.buyfeerate*amount
-        amount -= fee
-        newargs = args[0], amount
-        self.fees.append([self.env.now, fee, 'buy'])
+        if 'fee' in args:
+            amount = args[1]
+            fee = self.buyfeerate*amount
+            amount -= fee
+            newargs = args[0], amount
+            self.fees.append([self.env.now, fee, 'buy'])
+        else:
+            newargs = args
         return simpy.Container.put(*newargs, **kwargs)
 
     def get(self, *args, **kwargs):
         # some amount subtracted off the top for selling fees
-        amount = args[1]
-        fee = self.sellfeerate*amount
-        amount -= fee
-        newargs = args[0], amount
-        self.fees.append([self.env.now, fee, 'sell'])
+        if 'fee' in args:
+            amount = args[1]
+            fee = self.sellfeerate*amount
+            amount -= fee
+            newargs = args[0], amount
+            self.fees.append([self.env.now, fee, 'sell'])
+        else:
+            newargs = args
         return simpy.Container.put(*newargs, **kwargs)
 
 
@@ -392,7 +406,7 @@ class logbook(object):
     def AccountTrend(self, account):
         # calculates the cumulative change in market value at each point in present trial
         trend = np.empty((len(account), 2))
-        trend[:, 0] = np.arange(1, len(account)+1)
+        trend[:, 0] = account.index
         for i in range(len(account)):
             trend[i, 1] = np.sum(account[:i])
         return pd.DataFrame(trend, columns=['Day', 'Value']).set_index('Day')
@@ -401,7 +415,7 @@ class logbook(object):
         # calculates the ROI at each time point in present trial
         # won't work yet because bought & value have different time base...........
         ROI = np.empty((len(value), 2))
-        ROI[:, 0] = np.arange(1, len(value)+1)
+        ROI[:, 0] = value.index
         for i in range(len(bought)):
             ROI[i, 1] = (value.iloc[i]*bought.iloc[:i].sum()-bought.iloc[:i].sum())/bought.iloc[:i].sum()
         return pd.DataFrame(ROI, columns=['Day', 'Value']).set_index('Day')
@@ -409,7 +423,7 @@ class logbook(object):
     def NetWorth(self, wallet, mining, index, bond):
         # calculates the net worth at each time point in present trial
         nw = np.empty((len(wallet), 2))
-        nw[:, 0] = np.arange(1, len(wallet)+1)
+        nw[:, 0] = wallet.index
         for i in range(len(wallet)):
             nw[i, 1] = wallet.iloc[i]+mining.iloc[i]+index.iloc[i]+bond.iloc[i]
         return pd.DataFrame(nw, columns=['Day', 'Value']).set_index('Day')
@@ -483,7 +497,7 @@ def setup(env, trial):
     # Rich Chambers (actual name of an accountant I knew)
     Rich = Investor(env, Jack, accounts)
 
-    # initialize and prepare logbook to store data
+    # initialize and prepare logbook to store dataf
     env.process(log.store(env, Rich, accounts, Jack))
 
     # market process
@@ -522,6 +536,33 @@ for i in range(1, NUMTRIALS+1):
     env.run(until=RUNTIME)
     del env
 
-graph(0)
+#plots graphs for last trial
+graph(NUMTRIALS-1)
 
 print '\npeace'
+
+# shows the relative market performance of each account given an initial amount
+mining_val = np.zeros(RUNTIME+1)
+index_val = np.zeros(RUNTIME+1)
+bond_val = np.zeros(RUNTIME+1)
+mining_val[0] = 100
+index_val[0] = 100
+bond_val[0] = 100
+day = 1
+for i in range(log.market_start, log.market_stop):
+    mining_val[day] = mining_val[day-1]*(1+market.mining_eft[i])
+    index_val[day] = index_val[day-1]*(1+market.snp_index[i])
+    bond_val[day] = bond_val[day-1]*(1+market.total_bond[i])
+    day += 1
+plt.figure(5)
+plt.plot(mining_val, 'red')
+plt.plot(index_val, 'blue')
+plt.plot(bond_val, 'green')
+plt.show()
+
+# shows the relative accumulated market value of each account
+plt.figure(6)
+plt.plot(log.mining_trend[3], 'red')
+plt.plot(log.index_trend[3], 'blue')
+plt.plot(log.bond_trend[3], 'green')
+plt.show()
