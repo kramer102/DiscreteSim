@@ -6,13 +6,6 @@ import pandas as pd
 import scipy.stats as st
 import matplotlib.pyplot as plt
 
-# notes for tonight:
-#   - get all dataframes together
-#   - functions for higher level variables (ROI, etc)
-#   - reformat plotting function
-
-# then, verification
-
 # next steps:
 #   - reformat allocation strategy & selling strategy
 #   - add meaningful selling criteria
@@ -26,27 +19,32 @@ import matplotlib.pyplot as plt
 NUMTRIALS = 4
 # 20 year simulation
 # RUNTIME = int(365*20)
-RUNTIME = 365
+# 251 days in trading year, paycheck every ten days, bills every twenty
+RUNTIME = 252
 # sample from historical or future data
 SAMPLE = 'h'
 # to grab data from quandl or just import from csv
 GRAB = False
 
+random.seed(42)
+
 
 class user(object):
     def __init__(self, env, initial):
         self.env = env
+        # environment, max capacity, initial amount
         self.wallet = simpy.Container(env, 1000000, initial)
         self.wallethistory = []
 
-        self.wage = 1500
+        self.wage = 0
 
         # interested or not in investing
         self.interest = 1
 
         env.process(self.life())
         env.process(self.bills(1300, 200, 300))
-        env.process(self.income(15))
+        PayPeriod = 10 # paycheck comes every x days
+        env.process(self.income(PayPeriod))
 
     def life(self):
         while True:
@@ -79,7 +77,8 @@ class user(object):
     def bills(self, rent, utilities, insurance):
         while True:
             # pay bills once a month
-            yield self.env.timeout(30)
+            # or 20 for adjusted fiscal year
+            yield self.env.timeout(20)
 
             # misc expenses
             extra = np.random.normal(300, 100)
@@ -95,9 +94,10 @@ class user(object):
             # get paid once per pay period
             yield self.env.timeout(period)
 
-            # deposit paycheck into wallet
-            yield self.wallet.put(self.wage)
-            print('payday {0}').format(self.wage)
+            if self.wage > 0.0:
+                # deposit paycheck into wallet
+                yield self.wallet.put(self.wage)
+                print('payday {0}').format(self.wage)
 
 
 class Market(object):
@@ -114,7 +114,7 @@ class Market(object):
             snp_index = pd.read_csv('snp_index.csv')
             mining_eft = pd.read_csv('mining_eft.csv')
             total_bond = pd.read_csv('total_bond.csv')
-            
+
         self.snp_index = np.asarray(snp_index.Close)
         self.mining_eft = np.asarray(mining_eft.Close)
         self.total_bond = np.asarray(total_bond.Close)
@@ -151,7 +151,7 @@ class Market(object):
         percentchange = 0
         # if trial is using historical data
         if SAMPLE == 'h':
-            percentchange = self.history(int(env.now)+log.market_start, account)
+            percentchange = self.history(int(env.now+1)+log.market_start, account)
         # if trial is using future data
         elif SAMPLE == 'f':
             percentchange = self.generate(account)
@@ -169,15 +169,11 @@ class Market(object):
             account.get(account, change)
 
         # log balance change
-        account.value.append([env.now, percentchange, change, account.level])
+        account.value.append([env.now+1, percentchange, change, account.level])
 
     def run(self, env, user, accounts):
         while True:
-            # the weekends aren't trading days
-            if np.mod(env.now+1, 5):
-                yield env.timeout(2)
-
-            print('\n- - day: {0} - -').format(env.now)
+            print('\n- - day: {0} - -').format(env.now+1)
 
             for i in range(len(accounts)):
                 # update the worth of each account
@@ -185,7 +181,7 @@ class Market(object):
                 print('{0} closes at balance {1}').format(accounts[i].name, accounts[i].level)
 
             # store wallet history
-            user.wallethistory.append([env.now, user.wallet.level])
+            user.wallethistory.append([env.now+1, user.wallet.level])
             print('>> wallet level at: {0}').format(user.wallet.level)
 
             # wait until next day
@@ -204,10 +200,15 @@ class Investor(object):
         env.process(self.sell(client, accounts))
 
     def invest(self, user, accounts):
+        criteria = True
         while True:
+            # investment criteria (able to invest)
+            if user.wage > 100 and user.wallet > 100: criteria = True
+            else: criteria = False
+
             # every 15 days invest money
             # the '+1' is so that you buy on the same day as your paycheck
-            if np.mod(env.now+1, 15) == 0.0:
+            if np.mod(self.env.now+1, 15) == 0.0 and criteria:
                 # amount set aside to invest every pay period
                 amount = 0.1*user.wage
                 yield user.wallet.get(amount)
@@ -219,7 +220,8 @@ class Investor(object):
                 for i in range(len(accounts)):
                     print('{0} invested in {1}').format(int(strategy[i]*amount), accounts[i].name)
                     yield accounts[i].put(accounts[i], int(strategy[i]*amount), 'fee')
-                    self.buyhistory.append([self.env.now, accounts[i].name, int(strategy[i]*amount), accounts[i].level])
+                    self.buyhistory.append([self.env.now+1, accounts[i].name, int(strategy[i]*amount), accounts[i].level])
+
             yield env.timeout(1)
 
     def sell(self, user, accounts):
@@ -236,7 +238,7 @@ class Investor(object):
                 for i in range(len(accounts)):
                     print('{0} sold of {1}').format(int(strategy[i]*amount), accounts[i].name)
                     yield accounts[i].investment.get(accounts[i], int(strategy[i]*amount), 'fee')
-                    self.sellhistory.append([self.env.now, accounts[i].name, int(strategy[i]*amount), accounts[i].level])
+                    self.sellhistory.append([self.env.now+1, accounts[i].name, int(strategy[i]*amount), accounts[i].level])
 
                 # deposit into account
                 yield user.wallet.put(amount)
@@ -266,7 +268,7 @@ class Account(simpy.Container):
             fee = self.buyfeerate*amount
             amount -= fee
             newargs = args[0], amount
-            self.fees.append([self.env.now, fee, 'buy'])
+            self.fees.append([self.env.now+1, fee, 'buy'])
         else:
             newargs = args
         return simpy.Container.put(*newargs, **kwargs)
@@ -278,10 +280,10 @@ class Account(simpy.Container):
             fee = self.sellfeerate*amount
             amount -= fee
             newargs = args[0], amount
-            self.fees.append([self.env.now, fee, 'sell'])
+            self.fees.append([self.env.now+1, fee, 'sell'])
         else:
             newargs = args
-        return simpy.Container.put(*newargs, **kwargs)
+        return simpy.Container.get(*newargs, **kwargs)
 
 
 class logbook(object):
@@ -485,9 +487,10 @@ def setup(env, trial):
     Jack = user(env, 1000)
 
     # investment accounts to open
-    mining = Account(env, 100000, 0, 'mining', 150, 0.011, 0.008)
-    index = Account(env, 100000, 0, 'index', 100, 0.016, 0.009)
-    bond = Account(env, 100000, 0, 'bond', 100, 0.006, 0.012)
+    # env, max cap, initial amount, name, buy in, buy fee rate, sell fee rate
+    mining = Account(env, 100000, 0, 'mining', 3000, 0.01, 0.01)
+    index = Account(env, 100000, 0, 'index', 3000, 0.01, 0.01)
+    bond = Account(env, 100000, 0, 'bond', 3000, 0.01, 0.01)
 
     accounts = [mining, index, bond]
 
@@ -497,7 +500,7 @@ def setup(env, trial):
     # Rich Chambers (actual name of an accountant I knew)
     Rich = Investor(env, Jack, accounts)
 
-    # initialize and prepare logbook to store dataf
+    # initialize and prepare logbook to store data
     env.process(log.store(env, Rich, accounts, Jack))
 
     # market process
@@ -516,13 +519,15 @@ for i in range(1, NUMTRIALS+1):
     print('\n * * * * * * Trial {0} * * * * * * \n'.format(i))
 
     # switches to future (generated) data for second half of trials
-    if i > int(NUMTRIALS/2):
-        SAMPLE = 'f'
+    # if i > int(NUMTRIALS/2):
+    #     SAMPLE = 'f'
 
-    if SAMPLE == 'f':
+    if SAMPLE == 'h':
+        # sample from historical data
         log.market_start = np.random.randint(0, len(market.mining_eft)-RUNTIME)
         log.market_stop = log.market_start+RUNTIME
-    elif SAMPLE == 'h':
+    elif SAMPLE == 'f':
+        # sample from generated data
         log.market_start = 0
         log.market_stop = RUNTIME
 
@@ -542,23 +547,23 @@ graph(NUMTRIALS-1)
 print '\npeace'
 
 # shows the relative market performance of each account given an initial amount
-mining_val = np.zeros(RUNTIME+1)
-index_val = np.zeros(RUNTIME+1)
-bond_val = np.zeros(RUNTIME+1)
-mining_val[0] = 100
-index_val[0] = 100
-bond_val[0] = 100
-day = 1
-for i in range(log.market_start, log.market_stop):
-    mining_val[day] = mining_val[day-1]*(1+market.mining_eft[i])
-    index_val[day] = index_val[day-1]*(1+market.snp_index[i])
-    bond_val[day] = bond_val[day-1]*(1+market.total_bond[i])
-    day += 1
-plt.figure(5)
-plt.plot(mining_val, 'red')
-plt.plot(index_val, 'blue')
-plt.plot(bond_val, 'green')
-plt.show()
+# mining_val = np.zeros(RUNTIME+1)
+# index_val = np.zeros(RUNTIME+1)
+# bond_val = np.zeros(RUNTIME+1)
+# mining_val[0] = 100
+# index_val[0] = 100
+# bond_val[0] = 100
+# day = 1
+# for i in range(log.market_start, log.market_stop):
+#     mining_val[day] = mining_val[day-1]*(1+market.mining_eft[i])
+#     index_val[day] = index_val[day-1]*(1+market.snp_index[i])
+#     bond_val[day] = bond_val[day-1]*(1+market.total_bond[i])
+#     day += 1
+# plt.figure(5)
+# plt.plot(mining_val, 'red')
+# plt.plot(index_val, 'blue')
+# plt.plot(bond_val, 'green')
+# plt.show()
 
 # shows the relative accumulated market value of each account
 plt.figure(6)
@@ -566,3 +571,19 @@ plt.plot(log.mining_trend[3], 'red')
 plt.plot(log.index_trend[3], 'blue')
 plt.plot(log.bond_trend[3], 'green')
 plt.show()
+
+# dataframe of all buying and selling activity (only last trial)
+BoughtSold = {'B_Mining':log.mining_bought[3], 'S_Mining':log.mining_sold[3],
+      'B_Index':log.index_bought[3], 'S_Index':log.index_sold[3],
+      'B_Bond':log.bond_bought[3], 'S_Bond':log.bond_sold[3]}
+BoughtSold = pd.DataFrame(BoughtSold, index=np.arange(1, RUNTIME)).fillna(0)
+
+# dataframe of all activity in the mining account (only last trial)
+MiningSummary = {'Bought':log.mining_bought[3], 'Sold':log.mining_sold[3], 'Fees':log.mining_fees[3],
+                 'Amount':log.mining_amount[3]}
+MiningSummary = pd.DataFrame(MiningSummary, index=np.arange(1, RUNTIME)).fillna(0)
+
+# dataframe of all account values (only last trial)
+AccountSummary = {'Mining':log.mining_amount[3], 'Index':log.index_amount[3], 'Bond':log.bond_amount[3]}
+AccountSummary = pd.DataFrame(AccountSummary, index=np.arange(1, RUNTIME)).fillna(0)
+AccountSummary.tail()
